@@ -1,0 +1,22 @@
+---
+title: "Project 1"
+format: html
+editor: visual
+---
+
+```{r}
+
+```
+
+```{}
+```
+
+Every time you make a change to a document (new or existing), you will need to follow these four steps:
+
+1.  Stage the file—check the box next to the file.
+
+2.  Write a commit message—describe what changes you made.
+
+3.  Click “Commit” to log these changes.
+
+4.  Click “Push” to send these changes up to GitHub.
