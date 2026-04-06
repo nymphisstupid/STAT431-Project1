@@ -7,9 +7,12 @@ editor: visual
 
 ```{r}
 #| include: false
+library(tidytuesdayR)
+library(tidyverse)
+
 tuesdata <- tidytuesdayR::tt_load('2025-06-24')
-cases_month <- tuesdata$cases_month
-cases_year <- tuesdata$cases_year
+cases_month <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-06-24/cases_month.csv')
+cases_year <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-06-24/cases_year.csv')
 summarize(cases_year, n_distinct(country))
 ```
 
@@ -37,7 +40,7 @@ This data contains measles and rubella cases across the world. This data was dow
 
 ## Data Cleaning
 
-Describes data cleaning done in detail Addresses all of the following: Are datatypes changed? Are columns renamed? Are variables created or modified?
+Data cleaning was done to better read the data and help when visualizing. Are datatypes changed? Are columns renamed? Are variables created or modified?
 
 ```{r}
 # Data provided by WHO Provisional measles and rubella data. Cleaning variable
@@ -47,6 +50,8 @@ library(tidyverse)
 library(here)
 library(readxl)
 library(janitor)
+
+here::here()
 
 cases_month <- read_xlsx(here("404-table-web-epi-curve-data.xlsx"), 2) %>%
   janitor::clean_names() %>%
