@@ -1,14 +1,12 @@
 ---
 title: "Project 1"
+author: "Nymph Kong"
 format: html
 editor: visual
 ---
 
 ```{r}
 
-```
-
-```{}
 ```
 
 Every time you make a change to a document (new or existing), you will need to follow these four steps:
@@ -20,3 +18,13 @@ Every time you make a change to a document (new or existing), you will need to f
 3.  Click “Commit” to log these changes.
 
 4.  Click “Push” to send these changes up to GitHub.
+
+Data Context (described in GH repo) 5 pts Addresses Five: Who, Where, When, Why, and How
+
+Data Cleaning (displayed in GH repo) 5 pts Describes data cleaning done in detail Addresses all of the following: Are datatypes changed? Are columns renamed? Are variables created or modified?
+
+Research Questions w/ Og Data 5 pts Poses Two Thoughtful RQ RQs aren't easily answered RQs include 2+ variables
+
+Research Questions w/ Supplemental Data 5 pts Poses Two Thoughtful RQ RQs aren't easily answered RQs include 2+ variables
+
+Data Visualization Sketches 5 pts Two sketches of visuals *both* address RQs
