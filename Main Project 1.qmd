@@ -9,77 +9,51 @@ editor: visual
 #| include: false
 library(tidytuesdayR)
 library(tidyverse)
-
-tuesdata <- tidytuesdayR::tt_load('2025-06-24')
-cases_month <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-06-24/cases_month.csv')
-cases_year <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-06-24/cases_year.csv')
-summarize(cases_year, n_distinct(country))
-```
-
-Every time you make a change to a document (new or existing), you will need to follow these four steps:
-
-1.  Stage the file—check the box next to the file.
-
-2.  Write a commit message—describe what changes you made.
-
-3.  Click “Commit” to log these changes.
-
-4.  Click “Push” to send these changes up to GitHub.
-
-## Data Context
-
-This data contains measles and rubella cases across the world. This data was downloaded from the World Health Organisation [Provisional monthly measles and rubella data](https://immunizationdata.who.int/global?topic=Provisional-measles-and-rubella-data&location=) on 2025-06-12. Measles is a worldwide threat across many countries, with varying degrees of outbreaks. The data collects measles and rubella cases: clinically-compatible, epidemiologically linked, and laboratory-confirmed across 194 countries and separates the data into two data frames, monthly and yearly statistics. We can analysis this data to answer various important questions about theses diseases such as :
-
--   How have global measles cases changed over time?
-
--   Which regions or countries consistently report the highest measles burden?
-
--   Are there seasonal patterns in measles outbreaks across different regions?
-
--   Does the ratio of laboratory-confirmed cases to total cases reveal differences in healthcare capacity across countries?
-
-## Data Cleaning
-
-Data cleaning was done to better read the data and help when visualizing. Are datatypes changed? Are columns renamed? Are variables created or modified?
-
-```{r}
-# Data provided by WHO Provisional measles and rubella data. Cleaning variable
-# names and fixing data types.
-
-library(tidyverse)
+library(dplyr)
 library(here)
 library(readxl)
 library(janitor)
 
-here::here()
+tuesdata <- tt_load('2025-06-24')
 
-cases_month <- read_xlsx(here("404-table-web-epi-curve-data.xlsx"), 2) %>%
-  janitor::clean_names() %>%
-  dplyr::mutate(
-    dplyr::across(year:discarded, as.numeric)
-  )
-
-cases_year <- read_xlsx(here("403-table-web-reporting-data.xlsx"), 2) %>%
-  row_to_names(1) %>%
-  clean_names() %>%
-  rename(
-    country = member_state,
-    iso3 = iso_country_code,
-    measles_total= number_of_measles_cases_by_confirmation_method,
-    measles_lab_confirmed = na,
-    measles_epi_linked = na_2,
-    measles_clinical = na_3,
-    rubella_total = number_of_rubella_cases_by_confirmation_method,
-    rubella_lab_confirmed = na_4,
-    rubella_epi_linked = na_5,
-    rubella_clinical = na_6
-  ) %>%
-  slice(-1)
-
+measles <- tuesdata$measles
+cases_month <- tuesdata$cases_month
+cases_year <- tuesdata$cases_year
 ```
 
-Research Questions w/ Og Data 5 pts Poses Two Thoughtful RQ RQs aren't easily answered RQs include 2+ variables
+## Data Context
 
-Research Questions w/ Supplemental Data 5 pts Poses Two Thoughtful RQ RQs aren't easily answered RQs include 2+ variables
+This data contains measles and rubella cases across the world. This data was downloaded from the **World Health Organisation [Provisional monthly measles and rubella data](https://immunizationdata.who.int/global?topic=Provisional-measles-and-rubella-data&location=) on 2025-06-12**. Measles is a worldwide threat across many countries, with varying degrees of outbreaks. The data collects measles and rubella cases: clinically-compatible, epidemiologically linked, and laboratory-confirmed across 194 countries and separates the data into two data frames, monthly and yearly statistics.
 
-Data Visualization Sketches 5 pts Two sketches of visuals *both* address RQs
+Here are the first six rows of the monthly and yearly data sets:
+
+```{r}
+head(cases_month)
+head(cases_year)
+```
+
+## Data Cleaning
+
+This data was cleaned using the **janitor** package to standardize messy Excel headers into snake_case.
+
+For the **monthly** dataset, columns ranging from `year`to `discarded` were converted to numeric types to fix import errors where numbers were read as characters.
+
+For the **annual** data set, there were header corrections, variable renaming, and row filtering. The first row of the spreadsheet was converted to become the column names using `row_to_names(1)`. Specific columns that imported with generic names (e.g., `na`, `na_2`) were manually mapped to their true categories, such as `measles_lab_confirmed` and `rubella_epi_linked`, to ensure the data is searchable and interpretable. The first row of data was removed using `slice(-1)` to delete the redundant first row.
+
+## Explorations
+
+**RQ 1:** Do some countries experience recurring outbreaks while others show sustained declines?
+
+**RQ 2:** Do countries with lower vaccination rates experience significantly higher measles case counts compared to countries with high vaccination coverage?
+
+**RQ 3:** Which countries experience disproportionately high measles case rates relative to their population size?
+
+**Additional Data:** Population data by country (e.g., World Bank)
+
+**RQ 4:** Do countries with higher healthcare spending or stronger immunization programs experience fewer measles outbreaks over time?
+
+**Additional Data:** Healthcare expenditure or immunization coverage indicators (e.g., WHO / World Bank)
+
+## Data Visualization 
+
+Sketches - Two sketches of visuals *both* address RQs
