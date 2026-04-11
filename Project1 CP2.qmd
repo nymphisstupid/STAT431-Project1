@@ -1,0 +1,189 @@
+---
+title: "Project 1"
+author: "Nymph Kong"
+format: html
+editor: visual
+---
+
+```{r}
+#| include: false
+library(tidytuesdayR)
+library(tidyverse)
+library(dplyr)
+library(here)
+library(readxl)
+library(janitor)
+library(purrr)
+library(knitr)
+
+tuesdata <- tt_load('2025-06-24')
+
+measles <- tuesdata$measles
+cases_month <- tuesdata$cases_month
+cases_year <- tuesdata$cases_year
+```
+
+## Data Context
+
+This data contains measles and rubella cases across the world. This data was downloaded from the **World Health Organisation [Provisional monthly measles and rubella data](https://immunizationdata.who.int/global?topic=Provisional-measles-and-rubella-data&location=) on 2025-06-12**. Measles is a worldwide threat across many countries, with varying degrees of outbreaks. The data collects measles and rubella cases: clinically-compatible, epidemiologically linked, and laboratory-confirmed across 194 countries and separates the data into two data frames, monthly and yearly statistics.
+
+Here are the first six rows of the monthly and yearly data sets:
+
+```{r}
+head(cases_month)
+head(cases_year)
+```
+
+## Data Cleaning
+
+This data was cleaned using the **janitor** package to standardize messy Excel headers into snake_case.
+
+For the **monthly** dataset, columns ranging from `year`to `discarded` were converted to numeric types to fix import errors where numbers were read as characters.
+
+For the **annual** data set, there were header corrections, variable renaming, and row filtering. The first row of the spreadsheet was converted to become the column names using `row_to_names(1)`. Specific columns that imported with generic names (e.g., `na`, `na_2`) were manually mapped to their true categories, such as `measles_lab_confirmed` and `rubella_epi_linked`, to ensure the data is searchable and interpretable. The first row of data was removed using `slice(-1)` to delete the redundant first row.
+
+## Explorations and Summary Statistics
+
+### **RQ 1:** How do the lab-confirmed cases of measles in Italy compare across each specific month from 2012 to 2025?
+
+#### Summary 1: Total Lab Confirmed Measles Cases by Country and Month
+
+```{r}
+monthly_lab_confirmed_measles <- function(country_in) {
+  
+  cases_month |> 
+    filter(country == country_in) |> 
+    group_by(month) |> 
+    summarize(total_lab_confirmed = sum(measles_lab_confirmed))
+  
+}
+
+monthly_lab_confirmed_measles("Italy") |> 
+  mutate(month = case_when(month == 1 ~ "January", 
+                           month == 2 ~ "February", 
+                           month == 3 ~ "March", 
+                           month == 4 ~ "April", 
+                           month == 5 ~ "May", 
+                           month == 6 ~ "June", 
+                           month == 7 ~ "July", 
+                           month == 8 ~ "August", 
+                           month == 9 ~ "September", 
+                           month == 10 ~ "October", 
+                           month == 11 ~ "November", 
+                           month == 12 ~ "December")) |> 
+  kable(col.names = c("**Month**", "**Lab-Confirmed Measles Cases**"))
+```
+
+Italy's lab-confirmed measles cases show a clear seasonal peak in spring: March (1,890) and April (1,978) are the highest months, with cases declining sharply through summer and reaching their lowest in October (328) and September (373). This pattern — high in late winter/spring, low in summer and fall — is consistent with school-year transmission dynamics, where close contact in schools drives spread from January onward before dropping during summer recess.
+
+------------------------------------------------------------------------
+
+### **RQ 2:** Are measles cases becoming more concentrated in a smaller number of countries over time?
+
+#### Summary 2: Concentration of Measles Cases
+
+```{r}
+# Total global cases per year
+global_totals <- cases_year |>
+  group_by(year) |>
+  summarize(global_cases = sum(measles_total, na.rm = TRUE))
+
+# Custom function: compute top-n share for a given year
+top_n_share <- function(yr, n = 10) {
+  cases_year |>
+    filter(year == yr) |>
+    arrange(desc(measles_total)) |>
+    slice_head(n = n) |>
+    summarize(year = yr, top_n_cases = sum(measles_total, na.rm = TRUE))
+}
+
+# Iterate over all years using map_dfr
+years <- unique(cases_year$year)
+
+top10_by_year <- map_dfr(years, top_n_share, n = 10)
+
+# Concentration: share of global cases held by top 10 countries
+concentration <- left_join(global_totals, top10_by_year, by = "year") |>
+  mutate(top10_share = top_n_cases / global_cases)
+
+concentration |>
+  kable(col.names = c("**Year**", "**Global Cases**", "**Top 10 Cases**", "**Top 10 Share**"),
+        digits = 3)
+```
+
+The top 10 countries consistently account for 63–89% of global measles cases each year. Concentration peaked around 2015–2016 (≈86–89%), suggesting cases were highly clustered in a small set of high-burden countries. After 2018, concentration declined somewhat — particularly in 2020 during the COVID-19 pandemic — but rose again through 2022–2023, indicating that global burden remains unevenly distributed rather than spreading more democratically across countries.
+
+------------------------------------------------------------------------
+
+### **RQ 3:** How do measles case outcomes differ across regions and years?
+
+#### Summary 3: Measles Surveillance Proportions
+
+```{r}
+calc_measles_case_quality <- function(df) {
+  df |>
+    mutate(
+      clinical_rate = measles_clinical / measles_total,
+      epi_link_rate = measles_epi_linked / measles_total,
+      lab_confirm_rate = measles_lab_confirmed / measles_total
+    )
+}
+
+# Iterate over each region using map_dfr
+regions_month <- cases_month |> distinct(region) |> pull(region)
+
+surveillance_summary <- map_dfr(regions_month, function(reg) {
+  cases_month |>
+    filter(region == reg) |>
+    calc_measles_case_quality() |>
+    summarize(
+      region = reg,
+      avg_clinical_rate    = mean(clinical_rate,     na.rm = TRUE),
+      avg_epi_link_rate    = mean(epi_link_rate,     na.rm = TRUE),
+      avg_lab_confirm_rate = mean(lab_confirm_rate,  na.rm = TRUE)
+    )
+})
+
+surveillance_summary |>
+  kable(digits = 3,
+        col.names = c("**Region**", "**Avg Clinical Rate**",
+                      "**Avg Epi-Linked Rate**", "**Avg Lab-Confirmed Rate**"))
+```
+
+Lab-confirmation rates vary substantially across regions. AMR (Americas) achieves near-perfect lab confirmation (≈97–100%), reflecting strong diagnostic infrastructure. AFR (Africa) has a much lower lab-confirmation rate (around 50–60%) with a higher reliance on clinical diagnosis, suggesting limited laboratory capacity. EMR and SEAR fall in between. These differences matter for RQ3: a "high" case count in a low lab-confirmation region likely underestimates true burden, while AMR's counts are more reliable.
+
+------------------------------------------------------------------------
+
+### **RQ 4:** How do typical seasonal pattern of measles cases look across regions?
+
+#### Summary 4: Seasonal Patterns of measles cases across regions
+
+```{r}
+calc_monthly_avg <- function(region_name, df) {
+  df |>
+    filter(region == region_name) |>
+    group_by(month) |>
+    summarize(
+      avg_measles_total = mean(measles_total, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    mutate(
+      prop_annual_cases = avg_measles_total / sum(avg_measles_total),
+      region = region_name
+    )
+}
+
+regions <- cases_month |>
+  distinct(region) |>
+  pull(region)
+
+monthly_regional_avgs <- regions |>
+  map(calc_monthly_avg, df = cases_month) |>
+  list_rbind() |>
+  arrange(region, month)
+
+monthly_regional_avgs
+
+```
+
+Seasonal patterns differ markedly by region. AFR, EMR, SEAR, and WPR all peak in the first quarter (January–April), with cases declining sharply through summer — consistent with school-year transmission and dry-season crowding effects. EUR shows a similarly strong Jan–April peak but drops more steeply by July, likely reflecting high vaccination coverage that limits sustained transmission. AMR is the notable exception: its peak is more diffuse, occurring from August through November, which may reflect different school-year timing and outbreak dynamics in the region.

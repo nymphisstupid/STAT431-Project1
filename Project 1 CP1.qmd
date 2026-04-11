@@ -1,0 +1,114 @@
+---
+title: "Project 1"
+author: "Nymph Kong"
+format: html
+editor: visual
+---
+
+```{r}
+#| include: false
+library(tidytuesdayR)
+library(tidyverse)
+library(dplyr)
+library(here)
+library(readxl)
+library(janitor)
+
+tuesdata <- tt_load('2025-06-24')
+
+measles <- tuesdata$measles
+cases_month <- tuesdata$cases_month
+cases_year <- tuesdata$cases_year
+```
+
+## Data Context
+
+This data contains measles and rubella cases across the world. This data was downloaded from the **World Health Organisation [Provisional monthly measles and rubella data](https://immunizationdata.who.int/global?topic=Provisional-measles-and-rubella-data&location=) on 2025-06-12**. Measles is a worldwide threat across many countries, with varying degrees of outbreaks. The data collects measles and rubella cases: clinically-compatible, epidemiologically linked, and laboratory-confirmed across 194 countries and separates the data into two data frames, monthly and yearly statistics.
+
+Here are the first six rows of the monthly and yearly data sets:
+
+```{r}
+head(cases_month)
+head(cases_year)
+```
+
+## Data Cleaning
+
+This data was cleaned using the **janitor** package to standardize messy Excel headers into snake_case.
+
+For the **monthly** dataset, columns ranging from `year`to `discarded` were converted to numeric types to fix import errors where numbers were read as characters.
+
+For the **annual** data set, there were header corrections, variable renaming, and row filtering. The first row of the spreadsheet was converted to become the column names using `row_to_names(1)`. Specific columns that imported with generic names (e.g., `na`, `na_2`) were manually mapped to their true categories, such as `measles_lab_confirmed` and `rubella_epi_linked`, to ensure the data is searchable and interpretable. The first row of data was removed using `slice(-1)` to delete the redundant first row.
+
+## Explorations
+
+**RQ 1:** Do some countries experience recurring outbreaks while others show sustained declines?
+
+**RQ 2:** Are measles cases becoming more concentrated in a smaller number of countries over time?
+
+**RQ 3:** Which countries experience disproportionately high measles case rates relative to their population size?
+
+**Additional Data:** Population data by country (e.g., World Bank)
+
+**RQ 4:** Do countries with higher healthcare spending or stronger immunization programs experience fewer measles outbreaks over time?
+
+**Additional Data:** Healthcare expenditure or immunization coverage indicators (e.g., WHO / World Bank)
+
+## Data Visualization
+
+Here are the top 10 countries with the most cases plotted over time. These graphs show that some countries like China have continuous decline of cases while countries like the Philippines have reoccurring outbreaks.
+
+```{r}
+
+top_countries <- cases_year %>%
+  group_by(country) %>%
+  summarize(total_cases = sum(measles_total, na.rm = TRUE)) %>%
+  top_n(10, total_cases) %>%
+  pull(country)
+
+plot_data <- cases_year %>%
+  filter(country %in% top_countries)
+
+ggplot(plot_data, aes(x = year, y = measles_total, group = country)) +
+  geom_line(alpha = 0.7) +
+  facet_wrap(~ country, scales = "free_y") +
+  labs(
+    title = "Measles Trends by Country Over Time",
+    x = "Year",
+    y = "Measles Cases"
+  ) +
+  theme_minimal()
+```
+
+The following visualizes the concentration of the top 10 countries with the highest cases over time. The decreasing trend indicates that the concentration of cases are becoming more distributed among different countries.
+
+```{r}
+
+#Total global cases per year
+global_totals <- cases_year %>%
+  group_by(year) %>%
+  summarize(global_cases = sum(measles_total, na.rm = TRUE))
+
+#Top 10 countries per year
+top5 <- cases_year %>%
+  group_by(year) %>%
+  arrange(year, desc(measles_total)) %>%
+  slice_head(n = 10) %>%
+  summarize(top5_cases = sum(measles_total, na.rm = TRUE))
+
+#Concentration
+concentration <- left_join(global_totals, top5, by = "year") %>%
+  mutate(top5_share = top5_cases / global_cases)
+
+#Plot
+ggplot(concentration, aes(x = year, y = top5_share)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  labs(
+    title = "Concentration of Measles Cases Over Time",
+    subtitle = "Share of Global Cases from Top 10 Countries",
+    x = "Year",
+    y = "Proportion of Global Cases (Top 10 Countries)"
+  ) +
+  theme_minimal()
+```
