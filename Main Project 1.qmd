@@ -54,7 +54,7 @@ For the **annual** data set, there were header corrections, variable renaming, a
 
 **Additional Data:** Healthcare expenditure or immunization coverage indicators (e.g., WHO / World Bank)
 
-## Data Visualization 
+## Data Visualization
 
 Here are the top 10 countries with the most cases plotted over time. These graphs show that some countries like China have continuous decline of cases while countries like the Philippines have reoccurring outbreaks.
 

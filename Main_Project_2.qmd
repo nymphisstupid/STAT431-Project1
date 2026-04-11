@@ -1,0 +1,294 @@
+---
+title: "Project 1"
+author: "Nymph Kong"
+format: html
+editor: visual
+---
+
+```{r}
+#| include: false
+library(tidytuesdayR)
+library(tidyverse)
+library(dplyr)
+library(here)
+library(readxl)
+library(janitor)
+library(purrr)
+
+tuesdata <- tt_load('2025-06-24')
+
+measles <- tuesdata$measles
+cases_month <- tuesdata$cases_month
+cases_year <- tuesdata$cases_year
+```
+
+## Data Context
+
+This data contains measles and rubella cases across the world. This data was downloaded from the **World Health Organisation [Provisional monthly measles and rubella data](https://immunizationdata.who.int/global?topic=Provisional-measles-and-rubella-data&location=) on 2025-06-12**. Measles is a worldwide threat across many countries, with varying degrees of outbreaks. The data collects measles and rubella cases: clinically-compatible, epidemiologically linked, and laboratory-confirmed across 194 countries and separates the data into two data frames, monthly and yearly statistics.
+
+Here are the first six rows of the monthly and yearly data sets:
+
+```{r}
+head(cases_month)
+head(cases_year)
+```
+
+## Data Cleaning
+
+This data was cleaned using the **janitor** package to standardize messy Excel headers into snake_case.
+
+For the **monthly** dataset, columns ranging from `year`to `discarded` were converted to numeric types to fix import errors where numbers were read as characters.
+
+For the **annual** data set, there were header corrections, variable renaming, and row filtering. The first row of the spreadsheet was converted to become the column names using `row_to_names(1)`. Specific columns that imported with generic names (e.g., `na`, `na_2`) were manually mapped to their true categories, such as `measles_lab_confirmed` and `rubella_epi_linked`, to ensure the data is searchable and interpretable. The first row of data was removed using `slice(-1)` to delete the redundant first row.
+
+## Explorations
+
+**RQ 1:** Do some countries experience recurring outbreaks while others show sustained declines?
+
+**RQ 2:** Are measles cases becoming more concentrated in a smaller number of countries over time?
+
+**RQ 3:** Which countries experience disproportionately high measles case rates relative to their population size?
+
+**Additional Data:** Population data by country (e.g., World Bank)
+
+**RQ 4:** Do countries with higher healthcare spending or stronger immunization programs experience fewer measles outbreaks over time?
+
+**Additional Data:** Healthcare expenditure or immunization coverage indicators (e.g., WHO / World Bank)
+
+## Data Visualization
+
+Here are the top 10 countries with the most cases plotted over time. These graphs show that some countries like China have continuous decline of cases while countries like the Philippines have reoccurring outbreaks.
+
+```{r}
+
+top_countries <- cases_year %>%
+  group_by(country) %>%
+  summarize(total_cases = sum(measles_total, na.rm = TRUE)) %>%
+  top_n(10, total_cases) %>%
+  pull(country)
+
+plot_data <- cases_year %>%
+  filter(country %in% top_countries)
+
+ggplot(plot_data, aes(x = year, y = measles_total, group = country)) +
+  geom_line(alpha = 0.7) +
+  facet_wrap(~ country, scales = "free_y") +
+  labs(
+    title = "Measles Trends by Country Over Time",
+    x = "Year",
+    y = "Measles Cases"
+  ) +
+  theme_minimal()
+```
+
+The following visualizes the concentration of the top 10 countries with the highest cases over time. The decreasing trend indicates that the concentration of cases are becoming more distributed among different countries.
+
+```{r}
+
+#Total global cases per year
+global_totals <- cases_year %>%
+  group_by(year) %>%
+  summarize(global_cases = sum(measles_total, na.rm = TRUE))
+
+#Top 10 countries per year
+top5 <- cases_year %>%
+  group_by(year) %>%
+  arrange(year, desc(measles_total)) %>%
+  slice_head(n = 10) %>%
+  summarize(top5_cases = sum(measles_total, na.rm = TRUE))
+
+#Concentration
+concentration <- left_join(global_totals, top5, by = "year") %>%
+  mutate(top5_share = top5_cases / global_cases)
+
+#Plot
+ggplot(concentration, aes(x = year, y = top5_share)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  labs(
+    title = "Concentration of Measles Cases Over Time",
+    subtitle = "Share of Global Cases from Top 10 Countries",
+    x = "Year",
+    y = "Proportion of Global Cases (Top 10 Countries)"
+  ) +
+  theme_minimal()
+```
+
+## Summary Statistics
+
+### Summaries Using Existing (Unmodified) Columns
+
+#### Summary 1: Total Measles and Rubella Cases by WHO Region
+
+This summary uses a custom function and iteration to compute total case counts across all six WHO regions for both diseases, using the original columns in `cases_year`.
+
+```{r}
+#Summarizes total cases of a given disease for a given region
+summarize_region_cases <- function(data, region_name, disease_col) {
+  data |>
+    filter(region == region_name) |>
+    summarize(
+      region = region_name,
+      disease = disease_col,
+      total_cases = sum(.data[[disease_col]], na.rm = TRUE),
+      mean_cases = mean(.data[[disease_col]], na.rm = TRUE),
+      median_cases = median(.data[[disease_col]], na.rm = TRUE),
+      n_country_years = n()
+    )}
+
+#Iterate over all regions and both diseases using map_dfr
+regions <- unique(cases_year$region)
+diseases <- c("measles_total", "rubella_total")
+
+region_disease_summary <- map_dfr(diseases, function(dis) {
+  map_dfr(regions, function(reg) {
+    summarize_region_cases(cases_year, reg, dis)
+  })
+})
+
+region_disease_summary
+```
+
+This table shows that Africa has the highest total measles burden, while the Americas have the lowest. Rubella totals are generally lower across all regions, with Southeast Asia showing notable rubella cases.
+
+------------------------------------------------------------------------
+
+#### Summary 2: Monthly Seasonality of Measles Cases by Region
+
+This summary uses iteration to compute the average measles cases per calendar month across all regions in `cases_month`, using the original `month` and `measles_total` columns. This helps identify whether there are seasonal peaks.
+
+```{r}
+# Iterate over each region to compute average cases by month
+monthly_seasonality <- map_dfr(unique(cases_month$region), function(reg) {
+  cases_month |>
+    filter(region == reg) |>
+    group_by(month) |>
+    summarize(
+      region = reg,
+      avg_monthly_cases = mean(measles_total, na.rm = TRUE),
+      total_monthly_cases = sum(measles_total, na.rm = TRUE),
+      n_observations = n(),
+      .groups = "drop"
+    )
+})
+
+# Show a summary pivot: average cases per month by region
+monthly_seasonality |>
+  select(region, month, avg_monthly_cases) |>
+  pivot_wider(names_from = month, values_from = avg_monthly_cases,
+              names_prefix = "month_") |>
+  arrange(region)
+```
+
+The table above reveals that measles cases are not uniformly distributed throughout the year. Months 1–5 (January through May) tend to show elevated averages in several regions, reflecting the typical pre-summer outbreak pattern documented globally. AFR and EMR regions show the most pronounced seasonal variation.
+
+------------------------------------------------------------------------
+
+### Summaries Using Modified Columns
+
+#### Summary 3: Outbreak Severity Classification by Country-Year
+
+This summary creates a new column by classifying each country-year observation in `cases_year` into an outbreak severity tier, then uses a custom function to produce a count-and-proportion summary by severity tier and region.
+
+```{r}
+# Step 1: Create the modified column — outbreak severity category
+cases_year_severity <- cases_year |>
+  mutate(
+    severity_tier = case_when(
+      measles_total == 0            ~ "None",
+      measles_total < 100           ~ "Low",
+      measles_total < 1000          ~ "Moderate",
+      measles_total < 10000         ~ "High",
+      TRUE                          ~ "Very High"
+    ),
+    # Convert to ordered factor for proper ordering in summaries
+    severity_tier = factor(severity_tier,
+                           levels = c("None", "Low", "Moderate", "High", "Very High"),
+                           ordered = TRUE)
+  )
+
+# Step 2: Custom function to summarize severity distribution for a given region
+summarize_severity <- function(data, region_name) {
+  data |>
+    filter(region == region_name) |>
+    count(severity_tier, .drop = FALSE) |>
+    mutate(
+      region = region_name,
+      proportion = round(n / sum(n), 3)
+    ) |>
+    select(region, severity_tier, n, proportion)
+}
+
+# Step 3: Iterate over all regions
+all_regions_year <- unique(cases_year_severity$region)
+
+severity_summary <- map_dfr(all_regions_year, function(reg) {
+  summarize_severity(cases_year_severity, reg)
+})
+
+severity_summary
+```
+
+The severity classification reveals large regional differences. Europe has a relatively high proportion of "None" and "Low" yearsm, while AFRO and EMRO have more country-years classified as "High" or "Very High," pointing to ongoing outbreak challenges.
+
+------------------------------------------------------------------------
+
+#### Summary 4: Year by Year Case Change Rate by Country
+
+This summary modifies the data by computing the year by year *percent change* in measles cases for each country, then summarizes which countries show the most consistent increases or decreases. This helps directly address Research Question 1 about recurring outbreaks vs. sustained declines.
+
+```{r}
+# Create percent change in measles cases year-over-year column
+cases_year_change <- cases_year |>
+  arrange(country, year) |>
+  group_by(country) |>
+  mutate(
+    prev_year_cases = lag(measles_total),
+    yoy_change_pct = case_when(
+      is.na(prev_year_cases)          ~ NA_real_,
+      prev_year_cases == 0 & measles_total == 0 ~ 0,
+      prev_year_cases == 0            ~ NA_real_,   # avoid divide-by-zero
+      TRUE ~ ((measles_total - prev_year_cases) / prev_year_cases) * 100
+    )
+  ) |>
+  ungroup()
+
+# Summarize a country's trend
+summarize_country_trend <- function(data, country_name) {
+  data |>
+    filter(country == country_name, !is.na(yoy_change_pct)) |>
+    summarize(
+      country = country_name,
+      n_years = n(),
+      mean_yoy_change_pct = round(mean(yoy_change_pct, na.rm = TRUE), 1),
+      pct_years_increasing = round(mean(yoy_change_pct > 0, na.rm = TRUE) * 100, 1),
+      max_single_increase = round(max(yoy_change_pct, na.rm = TRUE), 1),
+      max_single_decrease = round(min(yoy_change_pct, na.rm = TRUE), 1)
+    )
+}
+
+# Iterate over countries with at least 5 years of data and non-trivial cases
+eligible_countries <- cases_year |>
+  group_by(country) |>
+  filter(sum(measles_total, na.rm = TRUE) > 500, n() >= 5) |>
+  pull(country) |>
+  unique()
+
+country_trends <- map_dfr(eligible_countries, function(ctry) {
+  summarize_country_trend(cases_year_change, ctry)
+})
+
+# Show the 10 countries with the highest average year-over-year increase
+country_trends |>
+  arrange(desc(mean_yoy_change_pct)) |>
+  slice_head(n = 10)
+```
+
+```{r}
+# Show the 10 countries with the most consistent sustained decline
+country_trends |>
+  arrange(mean_yoy_change_pct) |>
+  slice_head(n = 10)
+```
+
+The year-over-year change column reveals two clear country patterns. Countries at the top tend to be those experiencing recurring outbreaks, addressing Research Question 1. Countries with strongly negative mean change percentages and low `pct_years_increasing` values represent sustained success history in measles elimination.
