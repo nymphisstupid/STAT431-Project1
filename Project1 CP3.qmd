@@ -1,0 +1,460 @@
+---
+title: "Project 1"
+author: "Nymph Kong"
+format: html
+editor: visual
+---
+
+```{r}
+#| include: false
+library(tidytuesdayR)
+library(tidyverse)
+library(dplyr)
+library(here)
+library(readxl)
+library(janitor)
+library(purrr)
+library(knitr)
+library(httr)
+library(jsonlite)
+library(glue)
+library(ggplot2)
+library(scales)
+
+tuesdata <- tt_load('2025-06-24')
+
+measles     <- tuesdata$measles
+cases_month <- tuesdata$cases_month
+cases_year  <- tuesdata$cases_year
+```
+
+## Explorations and Summary Statistics
+
+### Summary 1 — Custom Function with Existing Data
+
+#### **RQ 1: How do the lab-confirmed cases of measles in Italy compare across each specific month from 2012 to 2025?**
+
+```{r}
+monthly_lab_confirmed_measles <- function(country_in) {
+  cases_month |>
+    filter(country == country_in) |>
+    group_by(month) |>
+    summarize(total_lab_confirmed = sum(measles_lab_confirmed))
+}
+
+monthly_lab_confirmed_measles("Italy") |>
+  mutate(month = case_when(
+    month == 1  ~ "January",
+    month == 2  ~ "February",
+    month == 3  ~ "March",
+    month == 4  ~ "April",
+    month == 5  ~ "May",
+    month == 6  ~ "June",
+    month == 7  ~ "July",
+    month == 8  ~ "August",
+    month == 9  ~ "September",
+    month == 10 ~ "October",
+    month == 11 ~ "November",
+    month == 12 ~ "December"
+  )) |>
+  kable(col.names = c("**Month**", "**Lab-Confirmed Measles Cases**"))
+```
+
+Italy's lab-confirmed measles cases show a clear seasonal peak in spring: March and April are the highest months, with cases declining sharply through summer and reaching their lowest in September and October. This pattern is consistent with school-year transmission dynamics, where close contact in schools drives spread from January onward before dropping during summer recess.
+
+------------------------------------------------------------------------
+
+### Summary 2 — Iteration with Existing Data
+
+#### **RQ 2: Are measles cases becoming more concentrated in a smaller number of countries over time?**
+
+This summary uses `measles_total`, an existing unmodified column, and computes results through iteration with `map_dfr()` over each year.
+
+```{r}
+global_totals <- cases_year |>
+  group_by(year) |>
+  summarize(global_cases = sum(measles_total, na.rm = TRUE))
+
+top_n_share <- function(yr, n = 10) {
+  cases_year |>
+    filter(year == yr) |>
+    arrange(desc(measles_total)) |>
+    slice_head(n = n) |>
+    summarize(year = yr, top_n_cases = sum(measles_total, na.rm = TRUE))
+}
+
+years <- unique(cases_year$year)
+top10_by_year <- map_dfr(years, top_n_share, n = 10)
+
+concentration <- left_join(global_totals, top10_by_year, by = "year") |>
+  mutate(top10_share = top_n_cases / global_cases)
+
+ggplot(concentration, aes(x = year, y = top10_share)) +
+  geom_line(linewidth = 1, color = "#1D9E75") +
+  geom_point(size = 2, color = "#1D9E75") +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title    = "Concentration of Measles Cases Over Time",
+    subtitle = "Share of global cases held by the top 10 countries each year",
+    x        = "Year",
+    y        = "Share of Global Cases"
+  ) +
+  theme_minimal()
+```
+
+The top 10 countries consistently account for 63–89% of global measles cases each year. Concentration peaked around 2015–2016, suggesting cases were highly clustered in a small set of high-burden countries. After 2018, concentration declined somewhat — particularly in 2020 during the COVID-19 pandemic — but rose again through 2022–2023.
+
+------------------------------------------------------------------------
+
+### Summary 3 — Custom Function with Modified Data
+
+#### **RQ 3: How do measles case outcomes differ across regions?**
+
+This summary creates modified columns (`clinical_rate`, `epi_link_rate`, `lab_confirm_rate`) derived from existing columns, and produces results through a custom function.
+
+```{r}
+calc_measles_case_quality <- function(df) {
+  df |>
+    mutate(
+      clinical_rate    = measles_clinical      / measles_total,
+      epi_link_rate    = measles_epi_linked    / measles_total,
+      lab_confirm_rate = measles_lab_confirmed / measles_total
+    ) |>
+    summarize(
+      avg_clinical_rate    = mean(clinical_rate,    na.rm = TRUE),
+      avg_epi_link_rate    = mean(epi_link_rate,    na.rm = TRUE),
+      avg_lab_confirm_rate = mean(lab_confirm_rate, na.rm = TRUE)
+    )
+}
+
+cases_month |>
+  group_by(region) |>
+  group_modify(~ calc_measles_case_quality(.x)) |>
+  kable(
+    digits    = 3,
+    col.names = c("**Region**", "**Avg Clinical Rate**",
+                  "**Avg Epi-Linked Rate**", "**Avg Lab-Confirmed Rate**")
+  )
+```
+
+Lab-confirmation rates vary substantially across regions. AMR (Americas) achieves near-perfect lab confirmation, reflecting strong diagnostic infrastructure. AFR (Africa) has a much lower lab-confirmation rate with a higher reliance on clinical diagnosis, suggesting limited laboratory capacity. These differences matter: a high case count in a low lab-confirmation region likely underestimates true burden.
+
+------------------------------------------------------------------------
+
+### Summary 4 — Iteration with Modified Data
+
+#### **RQ 4: How do typical seasonal patterns of measles cases look across regions?**
+
+This summary creates a modified column (`prop_annual_cases`) derived from monthly averages, and produces results through iteration with `map()` over each region.
+
+```{r}
+calc_monthly_avg <- function(region_name, df) {
+  df |>
+    filter(region == region_name) |>
+    group_by(month) |>
+    summarize(
+      avg_measles_total = mean(measles_total, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    mutate(
+      prop_annual_cases = avg_measles_total / sum(avg_measles_total),
+      region            = region_name
+    )
+}
+
+regions <- cases_month |>
+  distinct(region) |>
+  pull(region)
+
+monthly_regional_avgs <- regions |>
+  map(calc_monthly_avg, df = cases_month) |>
+  list_rbind() |>
+  arrange(region, month)
+
+ggplot(monthly_regional_avgs,
+       aes(x = month, y = prop_annual_cases, color = region, group = region)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 1.5) +
+  scale_x_continuous(
+    breaks = 1:12,
+    labels = c("Jan","Feb","Mar","Apr","May","Jun",
+               "Jul","Aug","Sep","Oct","Nov","Dec")
+  ) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title    = "Seasonal Measles Case Patterns by Region",
+    subtitle = "Monthly share of average annual cases",
+    x        = NULL,
+    y        = "Proportion of Annual Cases",
+    color    = "Region"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+Seasonal patterns differ markedly by region. AFR, EMR, SEAR, and WPR all peak in the first quarter (January–April), consistent with school-year transmission and dry-season crowding effects. AMR is the notable exception, with a more diffuse peak from August through November, possibly reflecting different school-year timing.
+
+------------------------------------------------------------------------
+
+## API Data
+
+### COVID Data January 2020 to March 2023
+
+The data set being loaded below came from API Ninjas, and it is the Covid-19 API. It contains historical data on Covid-19 cases for every country in the world. Each row is a country and each column is a date (of one single day) and what type of Covid-19 case it is (e.g. total, new cases that day). After pulling the data for all countries, we cleaned the set to represent the total number of cases of Covid-19 by month. Instead of each column representing a single day, each column now represents a single month of the given year (e.g. January 2020, August 2023).
+
+```{r}
+#| cache: true
+country_list <- data.frame(value = unique(cases_year$country))
+countries    <- country_list$value
+
+get_country_data <- function(country, api_key) {
+  if (str_detect(country, " ")) {
+    country <- str_replace_all(country, " ", "%20")
+  }
+
+  url      <- glue("https://api.api-ninjas.com/v1/covid19?country={country}")
+  response <- GET(url, add_headers("X-Api-Key" = api_key))
+
+  if (status_code(response) != 200) {
+    warning(glue("Failed to fetch data for {country}: HTTP {status_code(response)}"))
+    message("Status: ", status_code(response))
+    message("Body: ",   httr::content(response, as = "text", encoding = "UTF-8"))
+    return(NULL)
+  }
+
+  raw    <- httr::content(response, as = "text", encoding = "UTF-8")
+  parsed <- fromJSON(raw, flatten = TRUE)
+
+  if (length(parsed) == 0) {
+    warning(glue("No data returned for {country}"))
+    return(NULL)
+  }
+
+  as.data.frame(parsed)
+}
+
+api_key <- Sys.getenv("NINJA_API_KEY")
+cat("Key loaded:", nchar(api_key) > 0, "\n")
+
+safe_get_country_data <- safely(get_country_data)
+
+country_df <- map(countries, safe_get_country_data, api_key = api_key) |>
+  map("result") |>
+  compact() |>
+  bind_rows()
+```
+
+### Cleaning COVID Data
+
+```{r}
+cleaned_covid_df <- country_df |>
+  select(country, region, ends_with(".total")) |>
+  group_by(country) |>
+  summarise(across(ends_with(".total"), \(x) sum(x, na.rm = TRUE)), .groups = "drop") |>
+  pivot_longer(
+    cols      = ends_with(".total"),
+    names_to  = "date",
+    values_to = "cases"
+  ) |>
+  mutate(month = str_extract(date, "\\d{4}-\\d{2}")) |>
+  group_by(country, month) |>
+  summarise(cases = max(cases, na.rm = TRUE), .groups = "drop") |>
+  pivot_wider(
+    names_from  = month,
+    values_from = cases
+  )
+```
+
+------------------------------------------------------------------------
+
+### **RQ 5:** How does the total number of measles cases compare to the total number of Covid-19 cases across countries in 2020?
+
+```{r}
+library(scales)
+
+# Total measles cases per country in 2020
+measles_2020 <- cases_year |>
+  filter(year == 2020) |>
+  select(country, measles_total_2020 = measles_total)
+
+# Total Covid-19 cases per country in 2020 (max cumulative value across 2020 months)
+covid_2020 <- cleaned_covid_df |>
+  select(country, starts_with("2020-")) |>
+  rowwise() |>
+  mutate(covid_total_2020 = max(c_across(starts_with("2020-")), na.rm = TRUE)) |>
+  ungroup() |>
+  select(country, covid_total_2020)
+
+# Join, keep top 10 by COVID cases
+comparison_2020 <- inner_join(measles_2020, covid_2020, by = "country") |>
+  arrange(desc(covid_total_2020)) |>
+  slice_head(n = 10)
+
+# Reshape for plotting
+comparison_long <- comparison_2020 |>
+  pivot_longer(
+    cols      = c(measles_total_2020, covid_total_2020),
+    names_to  = "disease",
+    values_to = "cases"
+  ) |>
+  mutate(
+    disease = case_when(
+      disease == "measles_total_2020" ~ "Measles",
+      disease == "covid_total_2020"   ~ "COVID-19"
+    ),
+    country = fct_reorder(country, cases, .fun = max)
+  )
+
+ggplot(comparison_long, aes(y = country, x = cases, fill = disease)) +
+  geom_col(
+    position = position_dodge(width = 0.75),
+    width    = 0.65
+  ) +
+  scale_x_log10(
+    labels = label_number(scale_cut = cut_short_scale()),
+    breaks = 10^(0:8)
+  ) +
+  scale_fill_manual(values = c("COVID-19" = "#D85A30", "Measles" = "#1D9E75")) +
+  labs(
+    title    = "Measles vs. COVID-19 Cases in 2020",
+    subtitle = "Top 10 countries by COVID-19 case count — log scale",
+    x        = "Total Cases (log scale)",
+    y        = NULL,
+    fill     = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position    = "top",
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor   = element_blank(),
+    axis.text.y        = element_text(size = 10)
+  )
+```
+
+COVID-19 cases in 2020 dwarfed measles cases by several orders of magnitude across all countries. The log scale is necessary here to make measles counts visible alongside COVID totals, as even the highest-burden measles countries recorded only a few thousand cases compared to millions of COVID cases in the same year.
+
+------------------------------------------------------------------------
+
+### GDP Data
+
+The data set being loaded below came from API Ninjas, and it is the GDP API. It contains historical and current data on the Gross Domestic Product of countries around the world. The columns of the data set represent the growth of GDP, nominal GDP, and purchasing power parity. A few columns also have these variables in terms of per capita.
+
+```{r}
+#| cache: true
+get_country_gdp <- function(cntry, api_key) {
+  url  <- glue("https://api.api-ninjas.com/v1/gdp?country={URLencode(cntry, reserved = TRUE)}")
+
+  data <- GET(url,
+              add_headers("X-Api-Key" = api_key),
+              timeout(10))
+
+  if (status_code(data) != 200) {
+    warning(glue("Failed to fetch GDP for {cntry}: HTTP {status_code(data)}"))
+    return(NULL)
+  }
+
+  df <- fromJSON(rawToChar(data$content))
+  if (length(df) == 0) return(NULL)
+  as.data.frame(df)
+}
+
+safe_get_country_gdp <- safely(get_country_gdp)
+countries_gdp <- unique(cases_year$country)
+
+country_gdp_df <- map(countries_gdp, \(cntry) {
+    message("Fetching: ", cntry)
+    Sys.sleep(0.3)
+    safe_get_country_gdp(cntry, api_key = api_key)
+  }) |>
+  map("result") |>
+  compact() |>
+  bind_rows()
+
+cat("Done. Rows returned:", nrow(country_gdp_df), "\n")
+```
+
+### **RQ 6:** How do annual measles case trends differ across countries with different GDP levels?
+
+```{r}
+top_bottom_gdp <- country_gdp_df |>
+  group_by(country) |>
+  summarize(avg_gdp_per_capita_ppp = mean(gdp_per_capita_ppp, na.rm = TRUE)) |>
+  arrange(desc(avg_gdp_per_capita_ppp)) |>
+  slice(c(1:10, (n() - 9):n())) |>
+  mutate(group = ifelse(row_number() <= 10, "Top 10", "Bottom 10"))
+
+ggplot(top_bottom_gdp,
+       aes(x = reorder(country, avg_gdp_per_capita_ppp),
+           y = avg_gdp_per_capita_ppp,
+           fill = group)) +
+  geom_col(width = 0.7) +
+  coord_flip() +
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  scale_fill_manual(values = c("Top 10" = "#1D9E75", "Bottom 10" = "#D85A30")) +
+  labs(
+    title    = "Top and Bottom 10 Countries by Average GDP per Capita (PPP)",
+    subtitle = "Based on all available years in the GDP dataset",
+    x        = NULL,
+    y        = "Avg GDP per Capita PPP (USD)",
+    fill     = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position    = "top",
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor   = element_blank()
+  )
+```
+
+------------------------------------------------------------------------
+
+## Joining COVID, GDP, and Measles/Rubella Data
+
+```{r}
+# Read in the hard-saved files
+cases_year       <- read.csv("C:/STAT431/Projects/STAT431-Project1/Hard Saved Data/cases_year.csv")
+cleaned_covid_df <- read.csv("C:/STAT431/Projects/STAT431-Project1/Hard Saved Data/cleaned_covid_df.csv")
+country_gdp_df   <- read.csv("C:/STAT431/Projects/STAT431-Project1/Hard Saved Data/country_gdp_df.csv")
+
+# Prepare GDP: filter to matching years, average duplicates, rename to iso3 for joining
+gdp_clean <- country_gdp_df |>
+  filter(year >= 2012, year <= 2025) |>
+  group_by(country, year) |>
+  summarise(
+    gdp_growth         = mean(gdp_growth,            na.rm = TRUE),
+    gdp_nominal        = mean(gdp_nominal,            na.rm = TRUE),
+    gdp_per_capita     = mean(gdp_per_capita_nominal, na.rm = TRUE),
+    gdp_ppp            = mean(gdp_ppp,                na.rm = TRUE),
+    gdp_per_capita_ppp = mean(gdp_per_capita_ppp,     na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  rename(iso3 = country)
+
+# Prepare COVID: reshape wide to long, extract year, take max cumulative per country-year
+covid_long <- cleaned_covid_df |>
+  pivot_longer(
+    cols      = -country,
+    names_to  = "month",
+    values_to = "covid_cases"
+  ) |>
+  mutate(year = as.integer(str_extract(month, "\\d{4}"))) |>
+  group_by(country, year) |>
+  summarise(covid_total = max(covid_cases, na.rm = TRUE), .groups = "drop")
+
+# Build diseases_full: cases_year as base, join COVID by country+year, GDP by iso3+year
+diseases_full <- cases_year |>
+  left_join(covid_long, by = c("country", "year")) |>
+  left_join(gdp_clean,  by = c("iso3", "year")) |>
+  group_by(region, country, iso3, year) |>
+  summarise(
+    across(c(measles_total, measles_lab_confirmed, measles_epi_linked,
+             measles_clinical, rubella_total, discarded_cases, covid_total),
+           \(x) sum(x, na.rm = TRUE)),
+    across(c(total_population,
+             measles_incidence_rate_per_1000000_total_population,
+             gdp_growth, gdp_nominal, gdp_per_capita,
+             gdp_ppp, gdp_per_capita_ppp),
+           \(x) mean(x, na.rm = TRUE)),
+    .groups = "drop"
+  )
+```
